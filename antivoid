@@ -1,0 +1,10 @@
+       if Value then
+           local nan = 0/0  -- 0/0 produces a NaN ("Not a Number")
+           if not workspace then
+               warn("Workspace is not available!")
+               return
+           end
+           workspace.FallenPartsDestroyHeight = nan
+       else
+           workspace.FallenPartsDestroyHeight = -500
+       end
