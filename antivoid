@@ -1,4 +1,4 @@
-       if Value then
+       if _G.ANTIVOID_STATE then
            local nan = 0/0  -- 0/0 produces a NaN ("Not a Number")
            if not workspace then
                warn("Workspace is not available!")
