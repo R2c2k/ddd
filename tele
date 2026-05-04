@@ -18,7 +18,7 @@ return function(Rayfield)
 
     local Config = table.freeze({
         DistanceStep    = 10,
-        MinDistance      = 5,
+        MinDistance     = 5,
         PresetNear      = 10,
         PresetFar       = 200,
         MaxRange        = 1000,
@@ -51,15 +51,15 @@ return function(Rayfield)
     laser.Transparency = 0.3
 
     local indicator = Instance.new("Part")
-    indicator.Name        = "TK_Indicator"
-    indicator.Anchored    = true
-    indicator.CanCollide  = false
-    indicator.Locked      = true
-    indicator.CastShadow  = false
-    indicator.Shape       = Enum.PartType.Ball
-    indicator.Color       = Color3.fromRGB(85, 0, 170)
-    indicator.Material    = Enum.Material.Neon
-    indicator.Size        = Vector3.one * Config.IndicatorSize
+    indicator.Name         = "TK_Indicator"
+    indicator.Anchored     = true
+    indicator.CanCollide   = false
+    indicator.Locked       = true
+    indicator.CastShadow   = false
+    indicator.Shape        = Enum.PartType.Ball
+    indicator.Color        = Color3.fromRGB(85, 0, 170)
+    indicator.Material     = Enum.Material.Neon
+    indicator.Size         = Vector3.one * Config.IndicatorSize
     indicator.Transparency = 0.2
 
     local bodyPos = Instance.new("BodyPosition")
@@ -76,6 +76,9 @@ return function(Rayfield)
     local equipped    = false
     local connections = {}
 
+    local rotTarget  = nil
+    local activeGyro = nil
+
     local function disconnectAll()
         for _, conn in connections do
             if conn.Connected then conn:Disconnect() end
@@ -91,10 +94,7 @@ return function(Rayfield)
 
     local function showLaser(from, to)
         local dist = (to - from).Magnitude
-        if dist < 0.01 then
-            laser.Parent = nil
-            return
-        end
+        if dist < 0.01 then laser.Parent = nil return end
         laser.Size   = Vector3.new(Config.LaserWidth, Config.LaserWidth, dist)
         laser.CFrame = CFrame.lookAt(from:Lerp(to, 0.5), to)
         laser.Parent = workspace
@@ -110,42 +110,56 @@ return function(Rayfield)
         indicator.Parent = nil
     end
 
+    local function clearGyro()
+        if activeGyro and activeGyro.Parent then
+            activeGyro:Destroy()
+        end
+        activeGyro = nil
+        rotTarget  = nil
+    end
+
     local function release()
         bodyPos.Parent = nil
-        heldObject     = nil
-        holdDist       = nil
-        phase          = Phase.Idle
+        clearGyro()
+        heldObject = nil
+        holdDist   = nil
+        phase      = Phase.Idle
         hideVisuals()
     end
 
-    local function resetRotation()
+    local function rotate90()
         local obj = heldObject
         if not obj or not obj.Parent then return end
-        if obj:FindFirstChildOfClass("BodyGyro") then return end
+
+        local base = rotTarget or math.round(obj.Orientation.Y / 90) * 90
+        rotTarget  = (base + 90) % 360
+
+        if activeGyro and activeGyro.Parent then
+            activeGyro:Destroy()
+        end
 
         local gyro = Instance.new("BodyGyro")
         gyro.MaxTorque = Vector3.one * math.huge
+        gyro.P         = 8000
+        gyro.D         = 800
         gyro.CFrame    = CFrame.new(obj.Position)
+                         * CFrame.Angles(0, math.rad(rotTarget), 0)
         gyro.Parent    = obj
+        activeGyro     = gyro
 
         task.spawn(function()
             local elapsed = 0
             while elapsed < Config.RotResetTimeout do
-                elapsed += task.wait()
+                elapsed += task.wait(0.05)
                 if not obj or not obj.Parent then break end
-                local ori = obj.Orientation
-                if math.abs(ori.X) < 1
-                    and math.abs(ori.Y) < 1
-                    and math.abs(ori.Z) < 1
-                then
-                    break
-                end
+                if not gyro or not gyro.Parent then break end
+                local diff = (obj.Orientation.Y - rotTarget) % 360
+                if diff > 180 then diff = 360 - diff end
+                if diff < 2 then break end
             end
             if gyro and gyro.Parent then gyro:Destroy() end
-            if obj and obj.Parent then
-                obj.AssemblyLinearVelocity  = Vector3.zero
-                obj.AssemblyAngularVelocity = Vector3.zero
-                obj.Orientation             = Vector3.zero
+            if activeGyro == gyro then
+                activeGyro = nil
             end
         end)
     end
@@ -163,6 +177,7 @@ return function(Rayfield)
                 if not target.Anchored then
                     heldObject = target
                     holdDist   = (target.Position - handle.Position).Magnitude
+                    rotTarget  = nil
                     phase      = Phase.Holding
                     indicator.Parent = nil
                     return
@@ -203,7 +218,7 @@ return function(Rayfield)
         [Enum.KeyCode.E] = function()
             if holdDist then holdDist += Config.DistanceStep end
         end,
-        [Enum.KeyCode.R] = resetRotation,
+        [Enum.KeyCode.R] = rotate90,
         [Enum.KeyCode.T] = function()
             if holdDist then holdDist = Config.PresetNear end
         end,
@@ -251,6 +266,24 @@ return function(Rayfield)
     tool.Equipped:Connect(onEquipped)
     tool.Unequipped:Connect(onUnequipped)
     tool.Parent = player.Backpack
+
+    -- Usuń Model zawierający CarWall i Part
+    local function findCarModel()
+        for _, obj in ipairs(workspace:GetChildren()) do
+            local cw = obj:FindFirstChild("CarWall")
+            local pt = obj:FindFirstChild("Part")
+            if obj:IsA("Model")
+               and cw and cw:IsA("MeshPart")
+               and pt and pt:IsA("Part") then
+                return obj
+            end
+        end
+    end
+
+    local carModel = findCarModel()
+    if carModel then
+        carModel:Destroy()
+    end
 
     Rayfield:Notify({
         Title = "Telekinesis Loaded",
