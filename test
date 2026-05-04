@@ -75,6 +75,8 @@ return function(Rayfield)
     local mouse       = nil
     local equipped    = false
     local connections = {}
+    local rotStep     = 0    -- aktualny krok obrotu Y: 0/90/180/270
+    local highlight   = nil  -- Highlight na złapanym obiekcie
 
     local function disconnectAll()
         for _, conn in connections do
@@ -110,43 +112,61 @@ return function(Rayfield)
         indicator.Parent = nil
     end
 
+    local function showHighlight(obj)
+        if highlight then highlight:Destroy() end
+        highlight = Instance.new("Highlight")
+        highlight.Adornee            = obj
+        highlight.FillColor          = Color3.fromRGB(85, 0, 170)
+        highlight.OutlineColor       = Color3.fromRGB(170, 0, 255)
+        highlight.FillTransparency   = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Parent             = workspace
+    end
+
+    local function hideHighlight()
+        if highlight then
+            highlight:Destroy()
+            highlight = nil
+        end
+    end
+
     local function release()
         bodyPos.Parent = nil
         heldObject     = nil
         holdDist       = nil
+        rotStep        = 0
         phase          = Phase.Idle
+        hideHighlight()
         hideVisuals()
     end
 
-    local function resetRotation()
+    local function rotate90()
         local obj = heldObject
         if not obj or not obj.Parent then return end
-        if obj:FindFirstChildOfClass("BodyGyro") then return end
+
+        rotStep = (rotStep + 90) % 360
+
+        -- usuń stary gyro jeśli jest
+        local old = obj:FindFirstChildOfClass("BodyGyro")
+        if old then old:Destroy() end
 
         local gyro = Instance.new("BodyGyro")
         gyro.MaxTorque = Vector3.one * math.huge
-        gyro.CFrame    = CFrame.new(obj.Position)
+        gyro.P         = 8000
+        gyro.D         = 400
+        gyro.CFrame    = CFrame.new(obj.Position) * CFrame.Angles(0, math.rad(rotStep), 0)
         gyro.Parent    = obj
 
+        -- usuń gyro po ustabilizowaniu
         task.spawn(function()
             local elapsed = 0
             while elapsed < Config.RotResetTimeout do
                 elapsed += task.wait()
                 if not obj or not obj.Parent then break end
-                local ori = obj.Orientation
-                if math.abs(ori.X) < 1
-                    and math.abs(ori.Y) < 1
-                    and math.abs(ori.Z) < 1
-                then
-                    break
-                end
+                local diff = math.abs(obj.Orientation.Y - rotStep)
+                if diff < 2 or diff > 358 then break end
             end
             if gyro and gyro.Parent then gyro:Destroy() end
-            if obj and obj.Parent then
-                obj.AssemblyLinearVelocity  = Vector3.zero
-                obj.AssemblyAngularVelocity = Vector3.zero
-                obj.Orientation             = Vector3.zero
-            end
         end)
     end
 
@@ -163,7 +183,9 @@ return function(Rayfield)
                 if not target.Anchored then
                     heldObject = target
                     holdDist   = (target.Position - handle.Position).Magnitude
+                    rotStep    = 0
                     phase      = Phase.Holding
+                    showHighlight(target)
                     indicator.Parent = nil
                     return
                 end
@@ -203,7 +225,7 @@ return function(Rayfield)
         [Enum.KeyCode.E] = function()
             if holdDist then holdDist += Config.DistanceStep end
         end,
-        [Enum.KeyCode.R] = resetRotation,
+        [Enum.KeyCode.R] = rotate90,
         [Enum.KeyCode.T] = function()
             if holdDist then holdDist = Config.PresetNear end
         end,
