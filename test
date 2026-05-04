@@ -76,9 +76,8 @@ return function(Rayfield)
     local equipped    = false
     local connections = {}
 
-    -- rotacja: aktualny cel w stopniach (oś Y), nil = brak aktywnego gyro
-    local rotTarget   = nil
-    local activeGyro  = nil
+    local rotTarget  = nil
+    local activeGyro = nil
 
     local function disconnectAll()
         for _, conn in connections do
@@ -128,17 +127,13 @@ return function(Rayfield)
         hideVisuals()
     end
 
-    -- Obrót o +90° na osi Y względem aktualnego celu.
-    -- Jeden gyro na raz – niszczymy stary zanim ustawimy nowy.
     local function rotate90()
         local obj = heldObject
         if not obj or not obj.Parent then return end
 
-        -- wyznacz nowy cel: poprzedni cel + 90, albo bieżąca orientacja + 90
         local base = rotTarget or math.round(obj.Orientation.Y / 90) * 90
         rotTarget  = (base + 90) % 360
 
-        -- usuń poprzedni gyro żeby nie walczyły ze sobą
         if activeGyro and activeGyro.Parent then
             activeGyro:Destroy()
         end
@@ -146,13 +141,12 @@ return function(Rayfield)
         local gyro = Instance.new("BodyGyro")
         gyro.MaxTorque = Vector3.one * math.huge
         gyro.P         = 8000
-        gyro.D         = 800          -- duże D = brak oscylacji
+        gyro.D         = 800
         gyro.CFrame    = CFrame.new(obj.Position)
                          * CFrame.Angles(0, math.rad(rotTarget), 0)
         gyro.Parent    = obj
         activeGyro     = gyro
 
-        -- poczekaj na ustabilizowanie, potem usuń gyro (obiekt zostaje w miejscu)
         task.spawn(function()
             local elapsed = 0
             while elapsed < Config.RotResetTimeout do
@@ -161,13 +155,11 @@ return function(Rayfield)
                 if not gyro or not gyro.Parent then break end
                 local diff = (obj.Orientation.Y - rotTarget) % 360
                 if diff > 180 then diff = 360 - diff end
-                if diff < 2 then break end   -- ustabilizowany
+                if diff < 2 then break end
             end
             if gyro and gyro.Parent then gyro:Destroy() end
-            -- wyczyść referencję tylko jeśli to wciąż nasz gyro
             if activeGyro == gyro then
                 activeGyro = nil
-                -- NIE zerujemy rotTarget – zapamiętujemy pozycję do kolejnego R
             end
         end)
     end
@@ -185,7 +177,7 @@ return function(Rayfield)
                 if not target.Anchored then
                     heldObject = target
                     holdDist   = (target.Position - handle.Position).Magnitude
-                    rotTarget  = nil   -- reset celu obrotu przy nowym obiekcie
+                    rotTarget  = nil
                     phase      = Phase.Holding
                     indicator.Parent = nil
                     return
@@ -274,6 +266,24 @@ return function(Rayfield)
     tool.Equipped:Connect(onEquipped)
     tool.Unequipped:Connect(onUnequipped)
     tool.Parent = player.Backpack
+
+    -- Usuń Model zawierający CarWall i Part
+    local function findCarModel()
+        for _, obj in ipairs(workspace:GetChildren()) do
+            local cw = obj:FindFirstChild("CarWall")
+            local pt = obj:FindFirstChild("Part")
+            if obj:IsA("Model")
+               and cw and cw:IsA("MeshPart")
+               and pt and pt:IsA("Part") then
+                return obj
+            end
+        end
+    end
+
+    local carModel = findCarModel()
+    if carModel then
+        carModel:Destroy()
+    end
 
     Rayfield:Notify({
         Title = "Telekinesis Loaded",
