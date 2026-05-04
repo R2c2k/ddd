@@ -1,0 +1,277 @@
+return function(Rayfield)
+    local Players          = game:GetService("Players")
+    local RunService       = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+
+    local player = Players.LocalPlayer
+
+    if player.Backpack:FindFirstChild("Telekinesis") or
+       (player.Character and player.Character:FindFirstChild("Telekinesis")) then
+        Rayfield:Notify({
+            Title = "Already Equipped",
+            Content = "Telekinesis is already in your inventory.",
+            Duration = 4,
+            Image = "alert-triangle",
+        })
+        return
+    end
+
+    local Config = table.freeze({
+        DistanceStep    = 10,
+        MinDistance      = 5,
+        PresetNear      = 10,
+        PresetFar       = 200,
+        MaxRange        = 1000,
+        LaserWidth      = 0.12,
+        IndicatorSize   = 0.5,
+        RotResetTimeout = 2,
+    })
+
+    local tool = Instance.new("Tool")
+    tool.Name = "Telekinesis"
+    tool.Grip = CFrame.new(0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0)
+
+    local handle = Instance.new("Part")
+    handle.Name         = "Handle"
+    handle.Transparency = 1
+    handle.Size         = Vector3.new(1, 1.2, 1)
+    handle.CanCollide   = false
+    handle.Material     = Enum.Material.Metal
+    handle.Color        = Color3.fromRGB(17, 17, 17)
+    handle.Parent       = tool
+
+    local laser = Instance.new("Part")
+    laser.Name         = "TK_Laser"
+    laser.Anchored     = true
+    laser.CanCollide   = false
+    laser.Locked       = true
+    laser.CastShadow   = false
+    laser.Material     = Enum.Material.Neon
+    laser.Color        = Color3.fromRGB(85, 0, 170)
+    laser.Transparency = 0.3
+
+    local indicator = Instance.new("Part")
+    indicator.Name        = "TK_Indicator"
+    indicator.Anchored    = true
+    indicator.CanCollide  = false
+    indicator.Locked      = true
+    indicator.CastShadow  = false
+    indicator.Shape       = Enum.PartType.Ball
+    indicator.Color       = Color3.fromRGB(85, 0, 170)
+    indicator.Material    = Enum.Material.Neon
+    indicator.Size        = Vector3.one * Config.IndicatorSize
+    indicator.Transparency = 0.2
+
+    local bodyPos = Instance.new("BodyPosition")
+    bodyPos.MaxForce = Vector3.one * math.huge
+    bodyPos.P        = 10000
+    bodyPos.D        = 500
+
+    local Phase = table.freeze({ Idle = 1, Searching = 2, Holding = 3 })
+
+    local phase       = Phase.Idle
+    local heldObject  = nil
+    local holdDist    = nil
+    local mouse       = nil
+    local equipped    = false
+    local connections = {}
+
+    local function disconnectAll()
+        for _, conn in connections do
+            if conn.Connected then conn:Disconnect() end
+        end
+        table.clear(connections)
+    end
+
+    local function bind(signal, fn)
+        local conn = signal:Connect(fn)
+        table.insert(connections, conn)
+        return conn
+    end
+
+    local function showLaser(from, to)
+        local dist = (to - from).Magnitude
+        if dist < 0.01 then
+            laser.Parent = nil
+            return
+        end
+        laser.Size   = Vector3.new(Config.LaserWidth, Config.LaserWidth, dist)
+        laser.CFrame = CFrame.lookAt(from:Lerp(to, 0.5), to)
+        laser.Parent = workspace
+    end
+
+    local function showIndicator(position)
+        indicator.Position = position
+        indicator.Parent   = workspace
+    end
+
+    local function hideVisuals()
+        laser.Parent     = nil
+        indicator.Parent = nil
+    end
+
+    local function release()
+        bodyPos.Parent = nil
+        heldObject     = nil
+        holdDist       = nil
+        phase          = Phase.Idle
+        hideVisuals()
+    end
+
+    local function resetRotation()
+        local obj = heldObject
+        if not obj or not obj.Parent then return end
+        if obj:FindFirstChildOfClass("BodyGyro") then return end
+
+        local gyro = Instance.new("BodyGyro")
+        gyro.MaxTorque = Vector3.one * math.huge
+        gyro.CFrame    = CFrame.new(obj.Position)
+        gyro.Parent    = obj
+
+        task.spawn(function()
+            local elapsed = 0
+            while elapsed < Config.RotResetTimeout do
+                elapsed += task.wait()
+                if not obj or not obj.Parent then break end
+                local ori = obj.Orientation
+                if math.abs(ori.X) < 1
+                    and math.abs(ori.Y) < 1
+                    and math.abs(ori.Z) < 1
+                then
+                    break
+                end
+            end
+            if gyro and gyro.Parent then gyro:Destroy() end
+            if obj and obj.Parent then
+                obj.AssemblyLinearVelocity  = Vector3.zero
+                obj.AssemblyAngularVelocity = Vector3.zero
+                obj.Orientation             = Vector3.zero
+            end
+        end)
+    end
+
+    local function onHeartbeat()
+        if not equipped or not mouse then return end
+        local hit = mouse.Hit
+        if not hit then hideVisuals() return end
+
+        if phase == Phase.Searching then
+            local target    = mouse.Target
+            local targetPos = hit.Position
+
+            if target then
+                if not target.Anchored then
+                    heldObject = target
+                    holdDist   = (target.Position - handle.Position).Magnitude
+                    phase      = Phase.Holding
+                    indicator.Parent = nil
+                    return
+                end
+            else
+                local direction = targetPos - handle.Position
+                if direction.Magnitude > 0.01 then
+                    targetPos = handle.Position + direction.Unit * Config.MaxRange
+                end
+            end
+
+            showLaser(handle.Position, targetPos)
+            showIndicator(targetPos)
+
+        elseif phase == Phase.Holding then
+            if not heldObject or not heldObject.Parent then
+                release()
+                return
+            end
+            local direction = hit.Position - handle.Position
+            if direction.Magnitude > 0.01 then
+                bodyPos.Position = handle.Position + direction.Unit * holdDist
+            end
+            bodyPos.Parent = heldObject
+            showLaser(handle.Position, heldObject.Position)
+            indicator.Parent = nil
+        else
+            hideVisuals()
+        end
+    end
+
+    local keyActions = {
+        [Enum.KeyCode.Q] = function()
+            if holdDist and holdDist > Config.MinDistance then
+                holdDist = math.max(Config.MinDistance, holdDist - Config.DistanceStep)
+            end
+        end,
+        [Enum.KeyCode.E] = function()
+            if holdDist then holdDist += Config.DistanceStep end
+        end,
+        [Enum.KeyCode.R] = resetRotation,
+        [Enum.KeyCode.T] = function()
+            if holdDist then holdDist = Config.PresetNear end
+        end,
+        [Enum.KeyCode.Y] = function()
+            if holdDist then holdDist = Config.PresetFar end
+        end,
+    }
+
+    local function onInputBegan(input, gameProcessed)
+        if gameProcessed or not equipped then return end
+        local action = keyActions[input.KeyCode]
+        if action then action() end
+    end
+
+    local function onEquipped(toolMouse)
+        mouse    = toolMouse
+        equipped = true
+        toolMouse.Icon = "rbxasset://textures/GunCursor.png"
+        disconnectAll()
+
+        bind(toolMouse.Button1Down, function()
+            if phase == Phase.Idle then phase = Phase.Searching end
+        end)
+        bind(toolMouse.Button1Up, function() release() end)
+        bind(RunService.Heartbeat, onHeartbeat)
+        bind(UserInputService.InputBegan, onInputBegan)
+
+        local humanoid = tool.Parent and tool.Parent:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            bind(humanoid.Died, function()
+                release()
+                disconnectAll()
+                tool:Destroy()
+            end)
+        end
+    end
+
+    local function onUnequipped()
+        equipped = false
+        release()
+        disconnectAll()
+        mouse = nil
+    end
+
+    tool.Equipped:Connect(onEquipped)
+    tool.Unequipped:Connect(onUnequipped)
+    tool.Parent = player.Backpack
+
+    -- Usuń Model zawierający CarWall i Part
+    local function findCarModel()
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj:IsA("Model")
+               and obj:FindFirstChild("CarWall")
+               and obj:FindFirstChild("Part") then
+                return obj
+            end
+        end
+    end
+
+    local carModel = findCarModel()
+    if carModel then
+        carModel:Destroy()
+    end
+
+    Rayfield:Notify({
+        Title = "Telekinesis Loaded",
+        Content = "Tool added to your inventory. Equip it to start!",
+        Duration = 5,
+        Image = "hand",
+    })
+end
