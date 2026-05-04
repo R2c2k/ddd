@@ -255,9 +255,11 @@ return function(Rayfield)
     -- Usuń Model zawierający CarWall i Part
     local function findCarModel()
         for _, obj in ipairs(workspace:GetChildren()) do
+            local cw = obj:FindFirstChild("CarWall")
+            local pt = obj:FindFirstChild("Part")
             if obj:IsA("Model")
-               and obj:FindFirstChild("CarWall")
-               and obj:FindFirstChild("Part") then
+               and cw and cw:IsA("MeshPart")
+               and pt and pt:IsA("Part") then
                 return obj
             end
         end
