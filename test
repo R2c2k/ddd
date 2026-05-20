@@ -171,7 +171,7 @@ return function(Rayfield)
 
         if phase == Phase.Searching then
             local target    = mouse.Target
-            local targetPos = hit.Position
+            local targetPos = hit.Position  -- bezpośrednia pozycja z myszy, bez przeliczania
 
             if target then
                 if not target.Anchored then
@@ -182,13 +182,11 @@ return function(Rayfield)
                     indicator.Parent = nil
                     return
                 end
-            else
-                local direction = targetPos - handle.Position
-                if direction.Magnitude > 0.01 then
-                    targetPos = handle.Position + direction.Unit * Config.MaxRange
-                end
             end
 
+            -- POPRAWKA: usunięto blok "else" który rozciągał targetPos na MaxRange
+            -- i powodował ucieczkę kropki gdy nie było targetu.
+            -- mouse.Hit.Position już daje stabilny punkt w świecie gry.
             showLaser(handle.Position, targetPos)
             showIndicator(targetPos)
 
